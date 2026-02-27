@@ -22,15 +22,16 @@ def get_env(key, required=True, default=None):
 
 # -------------------------- 核心逻辑 --------------------------
 def fine_grained_random_wait():
-    """细粒度随机等待（适配窗口剩余时间）"""
+    """细粒度随机等待（适配窗口剩余时间+仓库唯一种子）"""
     # 配置时区（北京时间）
     tz = pytz.timezone("Asia/Shanghai")
     now = datetime.now(tz)
     
-    # 读取目标窗口信息（从YAML传递）
+    # 读取目标窗口信息 + 仓库唯一哈希值（从YAML传递）
     target_hour = int(get_env("TARGET_HOUR", required=False, default=now.hour))
     window_start = int(get_env("TARGET_WINDOW_START", required=False, default=0))
     window_end = int(get_env("TARGET_WINDOW_END", required=False, default=59))
+    repo_hash = int(get_env("REPO_HASH", required=False, default=0))  # 新增：仓库唯一哈希
     
     # 二次校验：确保当前时间在目标窗口内（兜底）
     if now.hour != target_hour or not (window_start <= now.minute <= window_end):
@@ -49,18 +50,21 @@ def fine_grained_random_wait():
         print("⏭ 已接近窗口末尾，立即发送消息")
         return
     
-    # 用当日日期做种子，确保当天随机时间固定（避免重复触发时等待时间不同）
+    # 优化种子：当日日期 + 仓库哈希值（确保不同fork用户随机结果不同）
     date_seed = int(now.strftime("%Y%m%d"))
-    random.seed(date_seed)
+    final_seed = date_seed + repo_hash  # 核心：加入仓库唯一值
+    random.seed(final_seed)
     
     # 生成随机等待秒数
     wait_seconds = random.randint(MIN_WAIT_SECONDS, actual_max_wait)
     send_time = now + timedelta(seconds=wait_seconds)
     
-    # 打印随机信息
+    # 打印随机信息（含仓库哈希，方便调试）
     print(f"\n🎲 细粒度随机配置：")
     print(f"   当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"   目标窗口：{target_hour}点 {window_start}-{window_end}分")
+    print(f"   仓库哈希：{repo_hash}")
+    print(f"   随机种子：{final_seed}（日期{date_seed}+哈希{repo_hash}）")
     print(f"   窗口剩余：{remaining_window_seconds} 秒")
     print(f"   随机等待：{wait_seconds} 秒（{wait_seconds/60:.1f} 分钟）")
     print(f"   预计发送：{send_time.strftime('%Y-%m-%d %H:%M:%S')}")

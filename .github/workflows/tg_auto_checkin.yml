@@ -42,7 +42,7 @@ jobs:
           echo "✅ 今日已发送，跳过本次触发"
           exit 0
 
-      # 步骤4：计算当日目标时间窗口（粗粒度随机）
+      # 步骤4：计算当日目标时间窗口（粗粒度随机，加入仓库唯一标识）
       - name: Calculate target time window
         id: window
         run: |
@@ -52,25 +52,33 @@ jobs:
           BASE_END=${{ env.BASE_HOUR_END }}
           TODAY_NUM=${{ steps.date.outputs.today_num }}
           
-          # 当前时间（转十进制，避免0开头八进制问题）
+          # 新增：获取仓库唯一标识并转为哈希值（每个fork不同）
+          REPO_ID=${{ github.repository }}
+          REPO_HASH=$(echo -n "$REPO_ID" | cksum | cut -d' ' -f1)
+          echo "🔍 仓库唯一标识：$REPO_ID → 哈希值：$REPO_HASH"
+          
+          # 当前时间（转十进制）
           CURRENT_HOUR=$(printf "%d" $(TZ=$TZ date +"%H"))
           CURRENT_MINUTE=$(printf "%d" $(TZ=$TZ date +"%M"))
           
+          # 优化种子：当日日期 + 仓库哈希值（确保不同用户随机结果不同）
+          SEED=$(( TODAY_NUM + REPO_HASH ))
           # 粗粒度随机：锁定当日目标小时+10分钟段
           HOUR_RANGE=$(( BASE_END - BASE_START + 1 ))
-          TARGET_HOUR=$(( BASE_START + TODAY_NUM % HOUR_RANGE ))          # 随机小时（9-14）
-          TARGET_TEN_MINUTE=$(( (TODAY_NUM + 1) % 6 ))                  # 随机10分钟段（0-5）
-          TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))             # 窗口起始分钟
-          TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))              # 窗口结束分钟
+          TARGET_HOUR=$(( BASE_START + SEED % HOUR_RANGE ))          # 随机小时（9-14）
+          TARGET_TEN_MINUTE=$(( (SEED + 1) % 6 ))                  # 随机10分钟段（0-5）
+          TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))         # 窗口起始分钟
+          TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))          # 窗口结束分钟
           
           # 输出关键信息
           echo "🎯 今日目标窗口：$TARGET_HOUR点 $TARGET_WINDOW_START-$TARGET_WINDOW_END 分"
           echo "⏰ 当前时间：$CURRENT_HOUR点 $CURRENT_MINUTE 分"
           
-          # 传递窗口信息到后续步骤
+          # 传递窗口信息和仓库哈希到后续步骤
           echo "TARGET_HOUR=$TARGET_HOUR" >> $GITHUB_OUTPUT
           echo "TARGET_WINDOW_START=$TARGET_WINDOW_START" >> $GITHUB_OUTPUT
           echo "TARGET_WINDOW_END=$TARGET_WINDOW_END" >> $GITHUB_OUTPUT
+          echo "REPO_HASH=$REPO_HASH" >> $GITHUB_OUTPUT
           
           # 判断是否在目标窗口内
           if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
@@ -88,16 +96,17 @@ jobs:
       - name: Run Python script (fine random)
         if: steps.window.outputs.in_target_window == 'true'
         env:
-          # 传递窗口信息给Python
+          # 传递窗口信息和仓库哈希给Python
           TARGET_HOUR: ${{ steps.window.outputs.TARGET_HOUR }}
           TARGET_WINDOW_START: ${{ steps.window.outputs.TARGET_WINDOW_START }}
           TARGET_WINDOW_END: ${{ steps.window.outputs.TARGET_WINDOW_END }}
-          # TG核心配置（从Secrets读取）
+          REPO_HASH: ${{ steps.window.outputs.REPO_HASH }}
+          # TG核心配置（仅传递Secrets，默认值由Python处理）
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
           TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
-          TG_MESSAGE: ${{ secrets.TG_MESSAGE || "/checkin" }}
+          TG_MESSAGE: ${{ secrets.TG_MESSAGE }}
         run: |
           # 安装依赖（指定版本，避免兼容问题）
           python -m pip install --upgrade pip
