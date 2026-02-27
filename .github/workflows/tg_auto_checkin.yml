@@ -92,12 +92,12 @@ jobs:
           TARGET_HOUR: ${{ steps.window.outputs.TARGET_HOUR }}
           TARGET_WINDOW_START: ${{ steps.window.outputs.TARGET_WINDOW_START }}
           TARGET_WINDOW_END: ${{ steps.window.outputs.TARGET_WINDOW_END }}
-          # TG核心配置（从Secrets读取）
+          # TG核心配置（从Secrets读取，修复默认值语法）
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
           TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
-          TG_MESSAGE: ${{ secrets.TG_MESSAGE || "/checkin" }}
+          TG_MESSAGE: ${{ secrets.TG_MESSAGE || /checkin }}  # 关键修复：去掉引号，正确的默认值写法
         run: |
           # 安装依赖（指定版本，避免兼容问题）
           python -m pip install --upgrade pip
