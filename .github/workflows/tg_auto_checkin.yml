@@ -92,6 +92,10 @@ jobs:
             exit 0
           fi
 
+      - name: Checkout the repository
+        if: steps.window.outputs.in_target_window == 'true'
+        uses: actions/checkout@v6
+
       # 步骤5：执行Python脚本（细粒度随机+发送）
       - name: Run Python script (fine random)
         if: steps.window.outputs.in_target_window == 'true'
