@@ -88,7 +88,7 @@ jobs:
             echo "in_target_window=true" >> $GITHUB_OUTPUT
           else
             echo "⏰ 未进入目标窗口，跳过"
-            echo "in_target_window=false" >> $GITHUB_OUTPUT
+            echo "in_target_window=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
