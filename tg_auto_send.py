@@ -36,7 +36,7 @@ def fine_grained_random_wait():
     # 二次校验：确保当前时间在目标窗口内（兜底）
     if now.hour != target_hour or not (window_start <= now.minute <= window_end):
         print("⚠️  当前时间不在目标窗口内，立即发送消息")
-        # return
+        return
     
     # 计算窗口剩余秒数（避免等待超时）
     current_minute = now.minute
