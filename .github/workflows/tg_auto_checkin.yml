@@ -1,4 +1,4 @@
-name: Telegram Auto Checkin (Smart Random)
+name: Telegram Auto Checkin (Stable Final)
 
 on:
   schedule:
@@ -14,143 +14,124 @@ jobs:
   smart_random_checkin:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: write # 必须授予此权限，才能删除缓存
 
     steps:
-      # 步骤1：生成当日标识+绝对路径
-      - name: Generate today key
-        id: date
-        run: |
-          TODAY=$(TZ=${{ env.TIMEZONE }} date +"%Y-%m-%d")
-          TODAY_NUM=$(TZ=${{ env.TIMEZONE }} date +"%Y%m%d")
-          CACHE_DIR="/home/runner/tg_checkin_flag"
-          FLAG_FILE="${CACHE_DIR}/sent.today"
-          CACHE_PREFIX="tg-checkin-${TODAY}"
-          
-          echo "today=$TODAY" >> $GITHUB_OUTPUT
-          echo "today_num=$TODAY_NUM" >> $GITHUB_OUTPUT
-          echo "cache_dir=${CACHE_DIR}" >> $GITHUB_OUTPUT
-          echo "flag_file=${FLAG_FILE}" >> $GITHUB_OUTPUT
-          echo "cache_prefix=${CACHE_PREFIX}" >> $GITHUB_OUTPUT
+    # 1️⃣ 生成日期 + 缓存key
+    - name: Generate today info
+      id: date
+      run: |
+        TODAY=$(TZ=${{ env.TIMEZONE }} date +"%Y-%m-%d")
+        TODAY_NUM=$(TZ=${{ env.TIMEZONE }} date +"%Y%m%d")
+        CACHE_DIR="$HOME/tg_checkin_flag"
+        FLAG_FILE="$CACHE_DIR/sent.today"
+        CACHE_KEY="tg-checkin-$TODAY"
 
-      # 步骤2：恢复当日缓存（官方Action）
-      - name: Restore checkin cache
-        id: cache-restore
-        uses: actions/cache/restore@v3
-        with:
-          path: ${{ steps.date.outputs.cache_dir }}
-          key: ${{ steps.date.outputs.cache_prefix }}-${{ github.run_id }} # 用run_id确保唯一性
-          restore-keys: |
-            ${{ steps.date.outputs.cache_prefix }}- # 前缀匹配，恢复最新的
+        echo "today=$TODAY" >> $GITHUB_OUTPUT
+        echo "today_num=$TODAY_NUM" >> $GITHUB_OUTPUT
+        echo "cache_dir=$CACHE_DIR" >> $GITHUB_OUTPUT
+        echo "flag_file=$FLAG_FILE" >> $GITHUB_OUTPUT
+        echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
 
-      # 步骤3：检查标记文件
-      - name: Skip if already sent
-        run: |
-          FLAG_FILE=${{ steps.date.outputs.flag_file }}
-          echo "🔍 检查标记文件：$FLAG_FILE"
-          
-          if [ -f "$FLAG_FILE" ]; then
-            echo "✅ 检测到已发送标记，直接退出"
-            exit 0
-          else
-            echo "⏳ 未检测到标记，继续执行"
-          fi
+    # 2️⃣ 恢复缓存（当天固定key）
+    - name: Restore cache
+      id: cache
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.date.outputs.cache_dir }}
+        key: ${{ steps.date.outputs.cache_key }}
 
-      # 步骤4：计算目标窗口（原逻辑不变）
-      - name: Calculate target window
-        id: window
-        run: |
-          TZ=${{ env.TIMEZONE }}
-          BASE_START=${{ env.BASE_HOUR_START }}
-          BASE_END=${{ env.BASE_HOUR_END }}
-          TODAY_NUM=${{ steps.date.outputs.today_num }}
+    # 3️⃣ 如果已有标记，直接退出
+    - name: Skip if already sent
+      run: |
+        if [ -f "${{ steps.date.outputs.flag_file }}" ]; then
+          echo "✅ 今日已发送，直接退出"
+          exit 0
+        else
+          echo "⏳ 今日未发送，继续执行"
+        fi
 
-          REPO_ID=${{ github.repository }}
-          REPO_HASH=$(echo -n "$REPO_ID" | cksum | cut -d' ' -f1)
-          CURRENT_HOUR=$((10#$(TZ=$TZ date +"%H")))
-          CURRENT_MINUTE=$((10#$(TZ=$TZ date +"%M")))
+    # 4️⃣ 计算随机窗口
+    - name: Calculate target window
+      id: window
+      run: |
+        TZ=${{ env.TIMEZONE }}
+        BASE_START=${{ env.BASE_HOUR_START }}
+        BASE_END=${{ env.BASE_HOUR_END }}
+        TODAY_NUM=${{ steps.date.outputs.today_num }}
 
-          SEED=$(( TODAY_NUM + REPO_HASH ))
-          HOUR_RANGE=$(( BASE_END - BASE_START + 1 ))
-          TARGET_HOUR=$(( BASE_START + SEED % HOUR_RANGE ))
-          TARGET_TEN_MINUTE=$(( (SEED + 1) % 6 ))
-          TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))
-          TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))
+        REPO_ID=${{ github.repository }}
+        REPO_HASH=$(echo -n "$REPO_ID" | cksum | cut -d' ' -f1)
 
-          echo "🎯 今日目标窗口：$TARGET_HOUR点 $TARGET_WINDOW_START-$TARGET_WINDOW_END 分"
-          echo "⏰ 当前时间：$CURRENT_HOUR点 $CURRENT_MINUTE 分"
+        CURRENT_HOUR=$((10#$(TZ=$TZ date +"%H")))
+        CURRENT_MINUTE=$((10#$(TZ=$TZ date +"%M")))
 
-          if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
-             [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
-             [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
-            echo "need_exec=true" >> $GITHUB_OUTPUT
-            echo "is_retry=false" >> $GITHUB_OUTPUT
-          elif [ $CURRENT_HOUR -gt $TARGET_HOUR ] || \
-               ([ $CURRENT_HOUR -eq $TARGET_HOUR ] && [ $CURRENT_MINUTE -gt $TARGET_WINDOW_END ]); then
-            echo "need_exec=true" >> $GITHUB_OUTPUT
-            echo "is_retry=true" >> $GITHUB_OUTPUT
-          else
-            echo "need_exec=false" >> $GITHUB_OUTPUT
-            echo "is_retry=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+        SEED=$(( TODAY_NUM + REPO_HASH ))
+        HOUR_RANGE=$(( BASE_END - BASE_START + 1 ))
+        TARGET_HOUR=$(( BASE_START + SEED % HOUR_RANGE ))
+        TARGET_TEN_MINUTE=$(( (SEED + 1) % 6 ))
+        TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))
+        TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))
 
-      # 步骤5：拉取代码
-      - name: Checkout repo
-        if: steps.window.outputs.need_exec == 'true'
-        uses: actions/checkout@v6
+        echo "🎯 今日目标窗口：$TARGET_HOUR点 $TARGET_WINDOW_START-$TARGET_WINDOW_END 分"
+        echo "⏰ 当前时间：$CURRENT_HOUR点 $CURRENT_MINUTE 分"
 
-      # 步骤6：执行发送脚本
-      - name: Run send script
-        if: steps.window.outputs.need_exec == 'true'
-        env:
-          TARGET_HOUR: ${{ steps.window.outputs.TARGET_HOUR }}
-          TARGET_WINDOW_START: ${{ steps.window.outputs.TARGET_WINDOW_START }}
-          TARGET_WINDOW_END: ${{ steps.window.outputs.TARGET_WINDOW_END }}
-          REPO_HASH: ${{ steps.window.outputs.REPO_HASH }}
-          IS_RETRY: ${{ steps.window.outputs.is_retry }}
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
-          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-          TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
-          TG_MESSAGE: ${{ secrets.TG_MESSAGE }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyrogram==2.0.106 tgcrypto==1.2.5 pytz
-          
-          python tg_auto_send.py
-          if [ $? -eq 0 ]; then
-            mkdir -p ${{ steps.date.outputs.cache_dir }}
-            touch ${{ steps.date.outputs.flag_file }}
-            echo "✅ 发送成功，创建标记文件"
-          else
-            echo "❌ 发送失败"
-            exit 1
-          fi
+        echo "TARGET_HOUR=$TARGET_HOUR" >> $GITHUB_OUTPUT
+        echo "TARGET_WINDOW_START=$TARGET_WINDOW_START" >> $GITHUB_OUTPUT
+        echo "TARGET_WINDOW_END=$TARGET_WINDOW_END" >> $GITHUB_OUTPUT
+        echo "REPO_HASH=$REPO_HASH" >> $GITHUB_OUTPUT
 
-      # 步骤7：主动删除所有旧的当日缓存（修正版，去掉 --yes 参数）
-      - name: Delete old caches for today
-        if: steps.window.outputs.need_exec == 'true' && success()
-        run: |
-          CACHE_PREFIX=${{ steps.date.outputs.cache_prefix }}
-          echo "🗑️ 清理所有旧的当日缓存: $CACHE_PREFIX"
-          
-          # 安装gh cli
-          type -p gh >/dev/null || (sudo apt update && sudo apt install gh -y)
-          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-          
-          # 列出并删除所有旧缓存
-          OLD_CACHE_KEYS=$(gh cache list --repo ${{ github.repository }} | grep "$CACHE_PREFIX" | grep -v "${{ github.run_id }}" | awk '{print $1}')
-          for KEY in $OLD_CACHE_KEYS; do
-            echo "删除旧缓存: $KEY"
-            gh cache delete "$KEY" --repo ${{ github.repository }}
-          done
+        if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
+           [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
+           [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
+          echo "need_exec=true" >> $GITHUB_OUTPUT
+          echo "is_retry=false" >> $GITHUB_OUTPUT
+        elif [ $CURRENT_HOUR -gt $TARGET_HOUR ] || \
+             ([ $CURRENT_HOUR -eq $TARGET_HOUR ] && [ $CURRENT_MINUTE -gt $TARGET_WINDOW_END ]); then
+          echo "need_exec=true" >> $GITHUB_OUTPUT
+          echo "is_retry=true" >> $GITHUB_OUTPUT
+        else
+          echo "need_exec=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
 
-      # 步骤8：保存新缓存（包含标记文件）
-      - name: Save checkin cache
-        if: steps.window.outputs.need_exec == 'true' && success()
-        uses: actions/cache/save@v3
-        with:
-          path: ${{ steps.date.outputs.cache_dir }}
-          key: ${{ steps.date.outputs.cache_prefix }}-${{ github.run_id }}
+    # 5️⃣ 拉代码
+    - name: Checkout
+      if: steps.window.outputs.need_exec == 'true'
+      uses: actions/checkout@v3
+
+    # 6️⃣ 执行 Python
+    - name: Run send script
+      if: steps.window.outputs.need_exec == 'true'
+      env:
+        TARGET_HOUR: ${{ steps.window.outputs.TARGET_HOUR }}
+        TARGET_WINDOW_START: ${{ steps.window.outputs.TARGET_WINDOW_START }}
+        TARGET_WINDOW_END: ${{ steps.window.outputs.TARGET_WINDOW_END }}
+        REPO_HASH: ${{ steps.window.outputs.REPO_HASH }}
+        IS_RETRY: ${{ steps.window.outputs.is_retry }}
+        TG_API_ID: ${{ secrets.TG_API_ID }}
+        TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+        TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
+        TG_MESSAGE: ${{ secrets.TG_MESSAGE || '/checkin' }}
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyrogram==2.0.106 tgcrypto==1.2.5 pytz
+
+        python tg_auto_send.py
+
+        if [ $? -eq 0 ]; then
+          mkdir -p "${{ steps.date.outputs.cache_dir }}"
+          touch "${{ steps.date.outputs.flag_file }}"
+          echo "✅ 发送成功，创建标记文件"
+        else
+          echo "❌ 发送失败"
+          exit 1
+        fi
+
+    # 7️⃣ 保存缓存（只会成功一次）
+    - name: Save cache
+      if: steps.window.outputs.need_exec == 'true' && success()
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.date.outputs.cache_dir }}
+        key: ${{ steps.date.outputs.cache_key }}
