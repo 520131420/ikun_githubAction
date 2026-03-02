@@ -23,6 +23,12 @@ def get_env(key, required=True, default=None):
 # -------------------------- 核心逻辑 --------------------------
 def fine_grained_random_wait():
     """细粒度随机等待（适配窗口剩余时间+仓库唯一种子）"""
+    # 判断是否为补签模式
+    is_retry = get_env("IS_RETRY", required=False, default="false").lower() == "true"
+    if is_retry:
+        print("⚠️  补签模式：跳过随机等待，立即发送")
+        return
+    
     # 配置时区（北京时间）
     tz = pytz.timezone("Asia/Shanghai")
     now = datetime.now(tz)
@@ -104,6 +110,7 @@ def send_tg_message():
             print(f"\n✅ [{now.strftime('%Y-%m-%d %H:%M:%S')}] 消息发送成功！")
             print(f"   接收对象：{target_user}")
             print(f"   消息内容：{message}")
+            print(f"   执行模式：{'补签' if get_env('IS_RETRY', False) == 'true' else '正常随机'}")
             
             app.stop()
             return True
@@ -121,7 +128,7 @@ if __name__ == "__main__":
     print("🚀 启动 Telegram 智能随机签到脚本")
     print("="*50)
     
-    # 第一步：细粒度随机等待
+    # 第一步：细粒度随机等待（补签模式跳过）
     fine_grained_random_wait()
     
     # 第二步：发送消息

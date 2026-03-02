@@ -2,7 +2,7 @@ name: Telegram Auto Checkin (Smart Random)
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # 每10分钟触发一次（仅目标窗口执行脚本）
+    - cron: "*/35 * * * *" # 降低触发频率：每35分钟一次（每天仅41次）
   workflow_dispatch: # 手动触发测试
 
 env:
@@ -42,8 +42,8 @@ jobs:
           echo "✅ 今日已发送，跳过本次触发"
           exit 0
 
-      # 步骤4：计算当日目标时间窗口（粗粒度随机，加入仓库唯一标识）
-      - name: Calculate target time window
+      # 步骤4：计算当日目标时间窗口+判断执行逻辑
+      - name: Calculate target window & check execution logic
         id: window
         run: |
           # 基础配置
@@ -74,37 +74,48 @@ jobs:
           echo "🎯 今日目标窗口：$TARGET_HOUR点 $TARGET_WINDOW_START-$TARGET_WINDOW_END 分"
           echo "⏰ 当前时间：$CURRENT_HOUR点 $CURRENT_MINUTE 分"
 
-          # 传递窗口信息和仓库哈希到后续步骤
+          # 传递基础信息到后续步骤
           echo "TARGET_HOUR=$TARGET_HOUR" >> $GITHUB_OUTPUT
           echo "TARGET_WINDOW_START=$TARGET_WINDOW_START" >> $GITHUB_OUTPUT
           echo "TARGET_WINDOW_END=$TARGET_WINDOW_END" >> $GITHUB_OUTPUT
           echo "REPO_HASH=$REPO_HASH" >> $GITHUB_OUTPUT
 
-          # 判断是否在目标窗口内
+          # 核心逻辑判断：
+          # 1. 若在目标窗口内 → 正常执行（带随机等待）
+          # 2. 若目标窗口已过期 → 补签（立即发送，无等待）
+          # 3. 若目标窗口未到 → 跳过
           if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
-            [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
-            [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
-            echo "✅ 进入目标窗口，执行Python脚本"
-            echo "in_target_window=true" >> $GITHUB_OUTPUT
+             [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
+             [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
+            echo "✅ 进入目标窗口，将执行正常随机发送"
+            echo "need_exec=true" >> $GITHUB_OUTPUT
+            echo "is_retry=false" >> $GITHUB_OUTPUT
+          elif [ $CURRENT_HOUR -gt $TARGET_HOUR ] || \
+               ([ $CURRENT_HOUR -eq $TARGET_HOUR ] && [ $CURRENT_MINUTE -gt $TARGET_WINDOW_END ]); then
+            echo "⚠️  目标窗口已过期且未发送，执行补签"
+            echo "need_exec=true" >> $GITHUB_OUTPUT
+            echo "is_retry=true" >> $GITHUB_OUTPUT
           else
-            echo "⏰ 未进入目标窗口，跳过"
-            echo "in_target_window=false" >> $GITHUB_OUTPUT
+            echo "⏰ 目标窗口未到，跳过本次触发"
+            echo "need_exec=false" >> $GITHUB_OUTPUT
+            echo "is_retry=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
       - name: Checkout the repository
-        if: steps.window.outputs.in_target_window == 'true'
+        if: steps.window.outputs.need_exec == 'true'
         uses: actions/checkout@v6
 
-      # 步骤5：执行Python脚本（细粒度随机+发送）
-      - name: Run Python script (fine random)
-        if: steps.window.outputs.in_target_window == 'true'
+      # 步骤5：执行Python脚本（区分正常执行/补签）
+      - name: Run Python script (normal/retry)
+        if: steps.window.outputs.need_exec == 'true'
         env:
-          # 传递窗口信息和仓库哈希给Python
+          # 传递窗口信息、仓库哈希、补签标识给Python
           TARGET_HOUR: ${{ steps.window.outputs.TARGET_HOUR }}
           TARGET_WINDOW_START: ${{ steps.window.outputs.TARGET_WINDOW_START }}
           TARGET_WINDOW_END: ${{ steps.window.outputs.TARGET_WINDOW_END }}
           REPO_HASH: ${{ steps.window.outputs.REPO_HASH }}
+          IS_RETRY: ${{ steps.window.outputs.is_retry }}
           # TG核心配置（仅传递Secrets，默认值由Python处理）
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
@@ -117,7 +128,7 @@ jobs:
           pip install pyrogram==2.0.106 tgcrypto==1.2.5 pytz
 
           # 运行发送脚本
-          echo "🚀 启动Telegram细粒度随机发送脚本"
+          echo "🚀 启动Telegram发送脚本（补签模式：$IS_RETRY）"
           python tg_auto_send.py
 
           # 仅脚本执行成功时标记缓存

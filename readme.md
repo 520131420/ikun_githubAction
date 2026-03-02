@@ -17,16 +17,16 @@
 ### 步骤 2：配置 GitHub Secrets
 进入你 Fork 后的仓库 → `Settings` → `Secrets and variables` → `Actions` → `New repository secret`，添加以下配置：
 
-| Secret 名称          | 必选 | 说明                                                                 | 示例值                  |
-|----------------------|------|----------------------------------------------------------------------|-------------------------|
-| `TG_API_ID`          | ✅    | Telegram 开发者 API ID（从 [my.telegram.org](https://my.telegram.org) 获取） | 1234567                 |
-| `TG_API_HASH`        | ✅    | Telegram 开发者 API Hash                                             | abcdef1234567890abcdef  |
-| `TG_SESSION_STRING`  | ✅    | Telegram 会话字符串（通过 pyrogram 生成）                            | （长字符串）            |
-| `TG_TARGET_USER`     | ✅    | 签到目标（机器人 ID/用户名/聊天 ID）                                 | @iKuuuu_VPN_bot         |
-| `TG_MESSAGE`         | ❌    | 签到指令（默认：`/checkin`）                                          | /sign                   |
-| `BASE_HOUR_START`    | ❌    | 执行小时范围起始（默认：9）                                           | 8                       |
-| `BASE_HOUR_END`      | ❌    | 执行小时范围结束（默认：14）                                          | 20                      |
-| `RANDOM_SALT`        | ❌    | 随机盐值（增强随机性，可选）                                         | 123456                  |
+| Secret 名称         | 必选 | 说明                                                         | 示例值                 |
+| ------------------- | ---- | ------------------------------------------------------------ | ---------------------- |
+| `TG_API_ID`         | ✅    | Telegram 开发者 API ID（从 [my.telegram.org](https://my.telegram.org) 获取） | 1234567                |
+| `TG_API_HASH`       | ✅    | Telegram 开发者 API Hash                                     | abcdef1234567890abcdef |
+| `TG_SESSION_STRING` | ✅    | Telegram 会话字符串（通过 pyrogram 生成）                    | （长字符串）           |
+| `TG_TARGET_USER`    | ✅    | 签到目标（机器人 ID/用户名/聊天 ID）                         | @iKuuuu_VPN_bot        |
+| `TG_MESSAGE`        | ❌    | 签到指令（默认：`/checkin`）                                 | /checkin               |
+| `BASE_HOUR_START`   | ❌    | 执行小时范围起始（默认：9）                                  | 8                      |
+| `BASE_HOUR_END`     | ❌    | 执行小时范围结束（默认：14）                                 | 20                     |
+| `RANDOM_SALT`       | ❌    | 随机盐值（增强随机性，可选）                                 | 123456                 |
 
 ### 步骤 3：启用 GitHub Actions
 1. 进入仓库 → `Actions` → 点击 `I understand my workflows, go ahead and enable them`
@@ -48,3 +48,5 @@
 env:
   BASE_HOUR_START: ${{ secrets.BASE_HOUR_START || 8 }}  # 起始小时
   BASE_HOUR_END: ${{ secrets.BASE_HOUR_END || 20 }}      # 结束小时
+
+```
