@@ -1,4 +1,4 @@
-name: Telegram Auto Checkin (Ultimate Stable)
+name: Telegram Auto Checkin (Verified Stable)
 
 on:
   schedule:
@@ -20,116 +20,106 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Generate today info
+        id: date
+        run: |
+          TODAY=$(TZ=${{ env.TIMEZONE }} date +"%Y-%m-%d")
+          TODAY_NUM=$(TZ=${{ env.TIMEZONE }} date +"%Y%m%d")
+          # 1️⃣ 修改：改用绝对路径，避免$HOME展开不一致问题
+          CACHE_DIR="/home/runner/tg_checkin_flag"
+          FLAG_FILE="$CACHE_DIR/sent.today"
+          CACHE_KEY="tg-checkin-$TODAY"
 
-    # 1️⃣ 生成日期信息
-    - name: Generate today info
-      id: date
-      run: |
-        TODAY=$(TZ=${{ env.TIMEZONE }} date +"%Y-%m-%d")
-        TODAY_NUM=$(TZ=${{ env.TIMEZONE }} date +"%Y%m%d")
+          echo "today_num=$TODAY_NUM" >> $GITHUB_OUTPUT
+          echo "cache_dir=$CACHE_DIR" >> $GITHUB_OUTPUT
+          echo "flag_file=$FLAG_FILE" >> $GITHUB_OUTPUT
+          echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
 
-        CACHE_DIR="$HOME/tg_checkin_flag"
-        FLAG_FILE="$CACHE_DIR/sent.today"
-        CACHE_KEY="tg-checkin-$TODAY"
+      - name: Restore cache
+        id: cache
+        uses: actions/cache/restore@v3
+        with:
+          path: ${{ steps.date.outputs.cache_dir }}
+          key: ${{ steps.date.outputs.cache_key }}
 
-        echo "today=$TODAY" >> $GITHUB_OUTPUT
-        echo "today_num=$TODAY_NUM" >> $GITHUB_OUTPUT
-        echo "cache_dir=$CACHE_DIR" >> $GITHUB_OUTPUT
-        echo "flag_file=$FLAG_FILE" >> $GITHUB_OUTPUT
-        echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
+      - name: Check already sent
+        id: sent
+        run: |
+          if [ -f "${{ steps.date.outputs.flag_file }}" ]; then
+            echo "already_sent=true" >> $GITHUB_OUTPUT
+            echo "✅ 今日已发送"
+          else
+            echo "already_sent=false" >> $GITHUB_OUTPUT
+            echo "⏳ 今日未发送"
+          fi
 
-    # 2️⃣ 恢复缓存
-    - name: Restore cache
-      id: cache
-      uses: actions/cache/restore@v3
-      with:
-        path: ${{ steps.date.outputs.cache_dir }}
-        key: ${{ steps.date.outputs.cache_key }}
+      - name: Calculate window
+        id: window
+        if: steps.sent.outputs.already_sent != 'true'
+        run: |
+          TZ=${{ env.TIMEZONE }}
+          BASE_START=${{ env.BASE_HOUR_START }}
+          BASE_END=${{ env.BASE_HOUR_END }}
+          TODAY_NUM=${{ steps.date.outputs.today_num }}
 
-    # 3️⃣ 判断是否已发送
-    - name: Check already sent
-      id: sent
-      run: |
-        if [ -f "${{ steps.date.outputs.flag_file }}" ]; then
-          echo "already_sent=true" >> $GITHUB_OUTPUT
-          echo "✅ 今日已发送"
-        else
-          echo "already_sent=false" >> $GITHUB_OUTPUT
-          echo "⏳ 今日未发送"
-        fi
+          REPO_ID=${{ github.repository }}
+          REPO_HASH=$(echo -n "$REPO_ID" | cksum | cut -d' ' -f1)
 
-    # 4️⃣ 计算执行窗口
-    - name: Calculate window
-      id: window
-      if: steps.sent.outputs.already_sent != 'true'
-      run: |
-        TZ=${{ env.TIMEZONE }}
-        BASE_START=${{ env.BASE_HOUR_START }}
-        BASE_END=${{ env.BASE_HOUR_END }}
-        TODAY_NUM=${{ steps.date.outputs.today_num }}
+          CURRENT_HOUR=$((10#$(TZ=$TZ date +"%H")))
+          CURRENT_MINUTE=$((10#$(TZ=$TZ date +"%M")))
 
-        REPO_ID=${{ github.repository }}
-        REPO_HASH=$(echo -n "$REPO_ID" | cksum | cut -d' ' -f1)
+          SEED=$(( TODAY_NUM + REPO_HASH ))
+          HOUR_RANGE=$(( BASE_END - BASE_START + 1 ))
+          TARGET_HOUR=$(( BASE_START + SEED % HOUR_RANGE ))
+          TARGET_TEN_MINUTE=$(( (SEED + 1) % 6 ))
+          TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))
+          TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))
 
-        CURRENT_HOUR=$((10#$(TZ=$TZ date +"%H")))
-        CURRENT_MINUTE=$((10#$(TZ=$TZ date +"%M")))
+          if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
+             [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
+             [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
+            echo "need_exec=true" >> $GITHUB_OUTPUT
+            echo "is_retry=false" >> $GITHUB_OUTPUT
+          elif [ $CURRENT_HOUR -gt $TARGET_HOUR ] || \
+               ([ $CURRENT_HOUR -eq $TARGET_HOUR ] && [ $CURRENT_MINUTE -gt $TARGET_WINDOW_END ]); then
+            echo "need_exec=true" >> $GITHUB_OUTPUT
+            echo "is_retry=true" >> $GITHUB_OUTPUT
+          else
+            echo "need_exec=false" >> $GITHUB_OUTPUT
+          fi
 
-        SEED=$(( TODAY_NUM + REPO_HASH ))
-        HOUR_RANGE=$(( BASE_END - BASE_START + 1 ))
-        TARGET_HOUR=$(( BASE_START + SEED % HOUR_RANGE ))
-        TARGET_TEN_MINUTE=$(( (SEED + 1) % 6 ))
-        TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))
-        TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))
+      - name: Checkout
+        if: steps.sent.outputs.already_sent != 'true' && steps.window.outputs.need_exec == 'true'
+        uses: actions/checkout@v3
 
-        echo "🎯 目标窗口：$TARGET_HOUR点 $TARGET_WINDOW_START-$TARGET_WINDOW_END 分"
-        echo "⏰ 当前时间：$CURRENT_HOUR点 $CURRENT_MINUTE 分"
+      - name: Run Telegram Script
+        id: send
+        if: steps.sent.outputs.already_sent != 'true' && steps.window.outputs.need_exec == 'true'
+        env:
+          IS_RETRY: ${{ steps.window.outputs.is_retry }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
+          TG_MESSAGE: ${{ secrets.TG_MESSAGE }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyrogram==2.0.106 tgcrypto==1.2.5 pytz
 
-        if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
-           [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
-           [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
-          echo "need_exec=true" >> $GITHUB_OUTPUT
-          echo "is_retry=false" >> $GITHUB_OUTPUT
-        elif [ $CURRENT_HOUR -gt $TARGET_HOUR ] || \
-             ([ $CURRENT_HOUR -eq $TARGET_HOUR ] && [ $CURRENT_MINUTE -gt $TARGET_WINDOW_END ]); then
-          echo "need_exec=true" >> $GITHUB_OUTPUT
-          echo "is_retry=true" >> $GITHUB_OUTPUT
-        else
-          echo "need_exec=false" >> $GITHUB_OUTPUT
-        fi
+          python tg_auto_send.py
+          if [ $? -ne 0 ]; then
+            echo "send_success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
-    # 5️⃣ 拉代码
-    - name: Checkout
-      if: steps.sent.outputs.already_sent != 'true' && steps.window.outputs.need_exec == 'true'
-      uses: actions/checkout@v3
+          mkdir -p "${{ steps.date.outputs.cache_dir }}"
+          touch "${{ steps.date.outputs.flag_file }}"
+          echo "send_success=true" >> $GITHUB_OUTPUT
 
-    # 6️⃣ 执行发送
-    - name: Run Telegram Script
-      if: steps.sent.outputs.already_sent != 'true' && steps.window.outputs.need_exec == 'true'
-      env:
-        IS_RETRY: ${{ steps.window.outputs.is_retry }}
-        TG_API_ID: ${{ secrets.TG_API_ID }}
-        TG_API_HASH: ${{ secrets.TG_API_HASH }}
-        TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-        TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
-        TG_MESSAGE: ${{ secrets.TG_MESSAGE }}
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyrogram==2.0.106 tgcrypto==1.2.5 pytz
-
-        python tg_auto_send.py
-        if [ $? -ne 0 ]; then
-          echo "❌ 发送失败"
-          exit 1
-        fi
-
-        mkdir -p "${{ steps.date.outputs.cache_dir }}"
-        touch "${{ steps.date.outputs.flag_file }}"
-        echo "✅ 发送成功，已创建标记文件"
-
-    # 7️⃣ 保存缓存
-    - name: Save cache
-      if: steps.sent.outputs.already_sent != 'true' && steps.window.outputs.need_exec == 'true' && success() && steps.cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v3
-      with:
-        path: ${{ steps.date.outputs.cache_dir }}
-        key: ${{ steps.date.outputs.cache_key }}
+      - name: Save cache
+        # 2️⃣ 优化：增加success()确保只有脚本执行成功才保存（冗余但更健壮）
+        if: steps.send.outputs.send_success == 'true' && success()
+        uses: actions/cache/save@v3
+        with:
+          path: ${{ steps.date.outputs.cache_dir }}
+          key: ${{ steps.date.outputs.cache_key }}
