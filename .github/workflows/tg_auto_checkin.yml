@@ -145,9 +145,18 @@ jobs:
             exit 1
           fi
       # 步骤6：标记缓存（保持不变）
+      # 步骤：标记缓存（核心修复：强制重新保存缓存）
       - name: Mark cache as sent
         if: steps.window.outputs.need_exec == 'true' && success()
         run: |
           mkdir -p ~/tg_checkin_flag
           touch ~/tg_checkin_flag/sent.today
           echo "✅ 已创建标记文件，标记当日已完成"
+
+      # 新增步骤：强制重新保存缓存
+      - name: Force save cache with new flag
+        if: steps.window.outputs.need_exec == 'true' && success()
+        uses: actions/cache@v3
+        with:
+          path: ~/tg_checkin_flag
+          key: ${{ steps.date.outputs.CACHE_KEY }} # 使用同一个缓存key
