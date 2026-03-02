@@ -48,14 +48,28 @@ jobs:
           
           # 查询所有当日缓存
           echo "🔍 查询所有当日缓存..."
-          CACHE_KEYS=$(gh cache list --repo ${{ github.repository }} | grep $CACHE_PREFIX | awk '{print $1}')
+          CACHE_KEYS=$(gh cache list --repo ${{ github.repository }} | grep "$CACHE_PREFIX" | awk '{print $1}')
           
+          if [ -z "$CACHE_KEYS" ]; then
+            echo "ℹ️  未找到任何当日缓存"
+            exit 0
+          fi
+
           # 遍历所有缓存并强制恢复
           for KEY in $CACHE_KEYS; do
             echo "🔄 尝试恢复缓存：$KEY"
-            # 强制下载缓存并解压到目标目录
-            gh cache download $KEY --repo ${{ github.repository }} -f - | tar -zxf - -C /
-            # 检查是否恢复到了标记文件
+            
+            # 1. 下载缓存到临时文件
+            TMP_FILE=$(mktemp /tmp/cache.XXXXXX.tar.gz)
+            gh cache download "$KEY" --repo ${{ github.repository }} --output "$TMP_FILE"
+            
+            # 2. 解压到目标目录
+            if [ -f "$TMP_FILE" ]; then
+              tar -zxf "$TMP_FILE" -C /
+              rm -f "$TMP_FILE"
+            fi
+            
+            # 3. 检查是否恢复到了标记文件
             if [ -f "$FLAG_FILE" ]; then
               echo "✅ 找到包含标记文件的缓存：$KEY"
               break
