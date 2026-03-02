@@ -129,7 +129,7 @@ jobs:
             exit 1
           fi
 
-      # 步骤7：主动删除所有旧的当日缓存（核心！确保下次恢复的是最新的）
+      # 步骤7：主动删除所有旧的当日缓存（修正版，去掉 --yes 参数）
       - name: Delete old caches for today
         if: steps.window.outputs.need_exec == 'true' && success()
         run: |
@@ -144,7 +144,7 @@ jobs:
           OLD_CACHE_KEYS=$(gh cache list --repo ${{ github.repository }} | grep "$CACHE_PREFIX" | grep -v "${{ github.run_id }}" | awk '{print $1}')
           for KEY in $OLD_CACHE_KEYS; do
             echo "删除旧缓存: $KEY"
-            gh cache delete "$KEY" --repo ${{ github.repository }} --yes
+            gh cache delete "$KEY" --repo ${{ github.repository }}
           done
 
       # 步骤8：保存新缓存（包含标记文件）
