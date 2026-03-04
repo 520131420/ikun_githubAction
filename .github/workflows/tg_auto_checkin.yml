@@ -30,6 +30,11 @@ jobs:
           FLAG_FILE="$CACHE_DIR/sent.today"
           CACHE_KEY="tg-checkin-$TODAY"
 
+          echo "📅 今日日期：$TODAY"
+          echo "🗂️ 缓存目录：$CACHE_DIR"
+          echo "🔖 标记文件：$FLAG_FILE"
+          echo "🔑 缓存Key：$CACHE_KEY"
+          
           echo "today_num=$TODAY_NUM" >> $GITHUB_OUTPUT
           echo "cache_dir=$CACHE_DIR" >> $GITHUB_OUTPUT
           echo "flag_file=$FLAG_FILE" >> $GITHUB_OUTPUT
@@ -45,12 +50,13 @@ jobs:
       - name: Check already sent
         id: sent
         run: |
+          echo "🔍 检查标记文件是否存在：${{ steps.date.outputs.flag_file }}"
           if [ -f "${{ steps.date.outputs.flag_file }}" ]; then
             echo "already_sent=true" >> $GITHUB_OUTPUT
-            echo "✅ 今日已发送"
+            echo "✅ 今日已发送，跳过后续执行"
           else
             echo "already_sent=false" >> $GITHUB_OUTPUT
-            echo "⏳ 今日未发送"
+            echo "⏳ 今日未发送，继续执行"
           fi
 
       - name: Calculate window
@@ -75,16 +81,24 @@ jobs:
           TARGET_WINDOW_START=$(( TARGET_TEN_MINUTE * 10 ))
           TARGET_WINDOW_END=$(( TARGET_WINDOW_START + 9 ))
 
+          # 恢复关键日志输出
+          echo "🔢 仓库唯一标识：$REPO_ID (哈希值：$REPO_HASH)"
+          echo "⏰ 当前时间：$CURRENT_HOUR点$CURRENT_MINUTE分"
+          echo "🎯 今日目标发送窗口：$TARGET_HOUR点$TARGET_WINDOW_START-$TARGET_WINDOW_END分"
+          
           if [ $CURRENT_HOUR -eq $TARGET_HOUR ] && \
              [ $CURRENT_MINUTE -ge $TARGET_WINDOW_START ] && \
              [ $CURRENT_MINUTE -le $TARGET_WINDOW_END ]; then
+            echo "✅ 处于目标窗口内，执行正常发送"
             echo "need_exec=true" >> $GITHUB_OUTPUT
             echo "is_retry=false" >> $GITHUB_OUTPUT
           elif [ $CURRENT_HOUR -gt $TARGET_HOUR ] || \
                ([ $CURRENT_HOUR -eq $TARGET_HOUR ] && [ $CURRENT_MINUTE -gt $TARGET_WINDOW_END ]); then
+            echo "⚠️  目标窗口已过期，执行补签发送"
             echo "need_exec=true" >> $GITHUB_OUTPUT
             echo "is_retry=true" >> $GITHUB_OUTPUT
           else
+            echo "⏳ 目标窗口未到，本次不执行发送"
             echo "need_exec=false" >> $GITHUB_OUTPUT
           fi
 
@@ -103,17 +117,22 @@ jobs:
           TG_TARGET_USER: ${{ secrets.TG_TARGET_USER }}
           TG_MESSAGE: ${{ secrets.TG_MESSAGE }}
         run: |
+          echo "🔧 安装依赖包..."
           python -m pip install --upgrade pip
           pip install pyrogram==2.0.106 tgcrypto==1.2.5 pytz
 
+          echo "🚀 执行Telegram发送脚本（补签模式：$IS_RETRY）..."
           python tg_auto_send.py
           if [ $? -ne 0 ]; then
+            echo "❌ 消息发送失败"
             echo "send_success=false" >> $GITHUB_OUTPUT
             exit 1
           fi
 
+          echo "📝 创建发送标记文件..."
           mkdir -p "${{ steps.date.outputs.cache_dir }}"
           touch "${{ steps.date.outputs.flag_file }}"
+          echo "✅ 消息发送成功，标记文件已创建"
           echo "send_success=true" >> $GITHUB_OUTPUT
 
       - name: Save cache
@@ -123,3 +142,10 @@ jobs:
         with:
           path: ${{ steps.date.outputs.cache_dir }}
           key: ${{ steps.date.outputs.cache_key }}
+        id: save_cache
+      
+      - name: Cache save log
+        if: steps.send.outputs.send_success == 'true' && success()
+        run: |
+          echo "💾 缓存保存结果：${{ steps.save_cache.outcome }}"
+          echo "✅ 标记文件已保存到缓存，Key：${{ steps.date.outputs.cache_key }}"
